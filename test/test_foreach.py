@@ -1489,11 +1489,17 @@ class TestForeachDevice(TestCase):
         tensors = [torch.ones((), device=device, dtype=torch.float32) for _ in range(2)]
         scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
 
-        # For mul and div, the scalar is allowed to be on CPU too
+        # For mul, div and lerp, the scalar is allowed to be on CPU too
         actual = torch.foreach.mul(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.mul(scalar_cpu_tensor) for t in tensors])
         actual = torch.foreach.div(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
+        ends = [torch.full_like(t, 3.0) for t in tensors]
+        weight_cpu_tensor = torch.tensor(0.25, device="cpu")
+        actual = torch.foreach.lerp(tensors, ends, weight_cpu_tensor)
+        self.assertEqual(
+            actual, [t.lerp(e, weight_cpu_tensor) for t, e in zip(tensors, ends)]
+        )
 
     @onlyAccelerator
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
@@ -1692,6 +1698,91 @@ class TestForeachDevice(TestCase):
             RuntimeError, "scalar tensor expected to be 0 dim but"
         ):
             torch.foreach.add(tensors, torch.tensor([1.0, 1.0], device=device))
+        with self.assertRaisesRegex(
+            RuntimeError, "weight tensor expected to be 0 dim but"
+        ):
+            torch.foreach.lerp(
+                tensors, tensors, torch.tensor([0.5, 0.5], device=device)
+            )
+
+        tensors = [
+            make_tensor((2, 2), dtype=torch.float, device=device) for _ in range(2)
+        ]
+        with self.assertRaisesRegex(
+            RuntimeError, "value cannot be converted to type float"
+        ):
+            torch.foreach.lerp(
+                tensors, tensors, torch.tensor(0.5 + 0.5j, device=device)
+            )
+
+    @dtypes(
+        torch.float32, torch.float64, torch.float16, torch.bfloat16, torch.complex64
+    )
+    @parametrize(
+        "weight_dtype",
+        (None, torch.float32, torch.float64, torch.complex64),
+        name_fn=lambda d: "same" if d is None else str(d).removeprefix("torch."),
+    )
+    @parametrize(
+        "inplace", (False, True), name_fn=lambda x: "inplace" if x else "outplace"
+    )
+    def test_lerp_0dim_tensor_weight_matches_scalar_weight(
+        self, device, dtype, weight_dtype, inplace
+    ):
+        # The Tensor overload must match the Scalar overload bit for bit, with
+        # weights on both branches of lerp.
+        op = torch._foreach_lerp_ if inplace else torch._foreach_lerp
+        shapes = ((), (7,), (3, 33), (1031,))
+        for value in (0.1, 0.75):
+            weight = torch.tensor(value, dtype=weight_dtype or dtype, device=device)
+            inputs = [make_tensor(s, dtype=dtype, device=device) for s in shapes]
+            ends = [make_tensor(s, dtype=dtype, device=device) for s in shapes]
+            ref_inputs = [t.clone() for t in inputs]
+            actual = op(inputs, ends, weight)
+            expected = op(ref_inputs, ends, weight.item())
+            if inplace:
+                actual, expected = inputs, ref_inputs
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_lerp_0dim_tensor_weight_no_sync_and_cuda_graph(self, device):
+        inputs = [torch.zeros(s, device=device) for s in ((), (5,), (3, 7))]
+        ends = [torch.ones_like(t) for t in inputs]
+        weight = torch.tensor(0.25, device=device)
+
+        torch.cuda.set_sync_debug_mode("error")
+        try:
+            torch._foreach_lerp(inputs, ends, weight)
+            torch._foreach_lerp(inputs, ends, weight.double())
+            torch._foreach_lerp_(inputs, ends, weight)
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+
+        # Replays read the current value of the weight.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            torch._foreach_lerp_(inputs, ends, weight)
+        for value in (0.5, 0.25):
+            for t in inputs:
+                t.zero_()
+            weight.fill_(value)
+            graph.replay()
+            self.assertEqual(inputs, [torch.full_like(t, value) for t in inputs])
+
+    @onlyCUDA
+    def test_lerp_0dim_tensor_weight_on_other_device(self, device):
+        # As with a Python scalar, the weight may be on a device without inputs.
+        weight = torch.tensor(0.25, device=device)
+        input_devices = [["cpu"]]
+        if torch.cuda.device_count() > 1:
+            input_devices += [["cuda:1"], [device, "cuda:1"]]
+        for devices in input_devices:
+            inputs = [torch.zeros(3, device=d) for d in devices]
+            ends = [torch.ones_like(t) for t in inputs]
+            expected = [torch.full_like(t, 0.25) for t in inputs]
+            self.assertEqual(torch._foreach_lerp(inputs, ends, weight), expected)
+            torch._foreach_lerp_(inputs, ends, weight)
+            self.assertEqual(inputs, expected)
 
     @onlyAccelerator
     @deviceCountAtLeast(2)

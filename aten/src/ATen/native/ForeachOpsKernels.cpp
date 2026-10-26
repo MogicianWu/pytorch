@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <limits>
 #include <vector>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/OpMathType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
 #include <c10/util/irange.h>
@@ -475,6 +477,74 @@ void foreach_tensor_lerp_scalarlist_kernel_slow_(
   check_foreach_api_restrictions(tensors1, tensors2, scalars);
   for (const auto i : c10::irange(tensors1.size())) {
     tensors1[i].lerp_(tensors2[i], scalars[i]);
+  }
+}
+
+// lerp.Tensor type-promotes the weight with the inputs, while the Scalar
+// overload computes with the weight in the input's opmath type. Do the same
+// here so that both overloads give the same values.
+static Tensor lerp_with_tensor_weight(
+    const Tensor& self,
+    const Tensor& end,
+    const Tensor& weight) {
+  if (weight.scalar_type() == self.scalar_type()) {
+    return self.lerp(end, weight);
+  }
+  const auto opmath_type = at::toOpMathType(self.scalar_type());
+  if (opmath_type == self.scalar_type()) {
+    return self.lerp(end, weight.to(opmath_type));
+  }
+  return self.to(opmath_type)
+      .lerp(end.to(opmath_type), weight.to(opmath_type))
+      .to(self.scalar_type());
+}
+
+// The Scalar overload accepts a weight on a device that holds none of the
+// inputs, and a complex weight with real inputs if its imaginary part is zero.
+// lerp.Tensor can't do either, so these cases use the Scalar overload.
+static bool use_lerp_scalar_overload(TensorList tensors, const Tensor& weight) {
+  return std::any_of(tensors.begin(), tensors.end(), [&](const Tensor& t) {
+    return (!weight.is_cpu() && t.device() != weight.device()) ||
+        (weight.is_complex() && !t.is_complex());
+  });
+}
+
+std::vector<Tensor> foreach_tensor_lerp_tensor_kernel_slow(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Tensor& weight) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  check_foreach_lerp_weight(weight);
+  if (use_lerp_scalar_overload(tensors1, weight)) {
+    return foreach_tensor_lerp_list_kernel_slow(
+        tensors1, tensors2, weight.item());
+  }
+  std::vector<Tensor> result;
+  result.reserve(tensors1.size());
+  for (const auto i : c10::irange(tensors1.size())) {
+    result.emplace_back(
+        lerp_with_tensor_weight(tensors1[i], tensors2[i], weight));
+  }
+  return result;
+}
+
+void foreach_tensor_lerp_tensor_kernel_slow_(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Tensor& weight) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  check_foreach_lerp_weight(weight);
+  if (use_lerp_scalar_overload(tensors1, weight)) {
+    return foreach_tensor_lerp_list_kernel_slow_(
+        tensors1, tensors2, weight.item());
+  }
+  for (const auto i : c10::irange(tensors1.size())) {
+    if (weight.scalar_type() == tensors1[i].scalar_type()) {
+      tensors1[i].lerp_(tensors2[i], weight);
+    } else {
+      tensors1[i].copy_(
+          lerp_with_tensor_weight(tensors1[i], tensors2[i], weight));
+    }
   }
 }
 

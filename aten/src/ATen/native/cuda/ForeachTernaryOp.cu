@@ -225,4 +225,89 @@ void foreach_tensor_lerp_scalarlist_cuda_(
             LerpFunctor<opmath_t>());
       });
 }
+
+std::vector<at::Tensor> foreach_tensor_lerp_tensor_cuda(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Tensor& weight) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  check_foreach_lerp_weight(weight);
+  if (weight.device().is_cpu() ||
+      (weight.is_complex() && !tensors1[0].is_complex())) {
+    return foreach_tensor_lerp_list_cuda(tensors1, tensors2, weight.item());
+  }
+  if (!can_use_fast_route({tensors1, tensors2}, {}, true) ||
+      weight.device() != tensors1[0].device()) {
+    return foreach_tensor_lerp_tensor_kernel_slow(tensors1, tensors2, weight);
+  }
+
+  std::vector<at::Tensor> vec_res;
+  vec_res.reserve(tensors1.size());
+  for (const auto& t : tensors1) {
+    vec_res.emplace_back(at::native::empty_like(t));
+  }
+  auto tensor_lists = c10::make_nested<Tensor>(
+      tensors1.vec(), tensors2.vec(), std::move(vec_res));
+  // Match the Scalar overload, which computes with the weight in opmath_t.
+  const auto weight_opmath =
+      weight.to(at::toOpMathType(tensors1[0].scalar_type()));
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      tensors1[0].scalar_type(),
+      "foreach_tensor_lerp_tensor_cuda",
+      [&]() {
+        using opmath_t = typename at::opmath_type<scalar_t>;
+        multi_tensor_apply<3>(
+            tensor_lists,
+            TernaryOpScalarTensorFunctor<
+                scalar_t,
+                /* depth */ 3,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 2>(),
+            LerpFunctor<opmath_t>(),
+            weight_opmath.const_data_ptr<opmath_t>());
+      });
+
+  return std::move(tensor_lists[2]);
+}
+
+void foreach_tensor_lerp_tensor_cuda_(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Tensor& weight) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  check_foreach_lerp_weight(weight);
+  if (weight.device().is_cpu() ||
+      (weight.is_complex() && !tensors1[0].is_complex())) {
+    return foreach_tensor_lerp_list_cuda_(tensors1, tensors2, weight.item());
+  }
+  if (!can_use_fast_route({tensors1, tensors2}, {}, true) ||
+      weight.device() != tensors1[0].device()) {
+    return foreach_tensor_lerp_tensor_kernel_slow_(tensors1, tensors2, weight);
+  }
+
+  auto tensor_lists = c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec());
+  const auto weight_opmath =
+      weight.to(at::toOpMathType(tensors1[0].scalar_type()));
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      tensors1[0].scalar_type(),
+      "foreach_tensor_lerp_tensor_cuda_",
+      [&]() {
+        using opmath_t = typename at::opmath_type<scalar_t>;
+        multi_tensor_apply<2>(
+            tensor_lists,
+            TernaryOpScalarTensorFunctor<
+                scalar_t,
+                /* depth */ 2,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 0>(),
+            LerpFunctor<opmath_t>(),
+            weight_opmath.const_data_ptr<opmath_t>());
+      });
+  increment_version(tensors1);
+}
 } // namespace at::native

@@ -325,6 +325,7 @@ _foreach_with_tensor_overload = {
     "_foreach_add.Tensor",
     "_foreach_mul.Tensor",
     "_foreach_div.Tensor",
+    "_foreach_lerp.Tensor",
 }
 # The following do not support the alpha kwarg, which the nonforeach versions support.
 _skip_argument_len_check = {
