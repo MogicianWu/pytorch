@@ -11699,7 +11699,7 @@ def _sample_inputs_foreach_mm(opinfo, device, dtype, requires_grad, **kwargs):
 foreach_other_op_db: list[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        sample_inputs_func=foreach_inputs_sample_func(3, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(3, True, True, True),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         supports_autograd=True,
         supports_inplace_autograd=True,

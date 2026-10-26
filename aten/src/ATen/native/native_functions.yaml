@@ -11297,6 +11297,21 @@
     XPU: foreach_tensor_lerp_scalarlist_xpu_
   autogen: _foreach_lerp.ScalarList_out
 
+- func: _foreach_lerp.Tensor(Tensor[] self, Tensor[] tensors1, Tensor weight) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_lerp_tensor_kernel_slow
+    CUDA: foreach_tensor_lerp_tensor_cuda
+
+- func: _foreach_lerp_.Tensor(Tensor(a!)[] self, Tensor[] tensors1, Tensor weight) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_lerp_tensor_kernel_slow_
+    CUDA: foreach_tensor_lerp_tensor_cuda_
+  autogen: _foreach_lerp.Tensor_out
+
 - func: _foreach_lgamma(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function

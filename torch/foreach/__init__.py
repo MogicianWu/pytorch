@@ -1383,6 +1383,10 @@ def lerp(
 
 
 @overload
+def lerp(inputs: _TensorList, end: _TensorList, weight: Tensor, /) -> _TensorTuple: ...
+
+
+@overload
 def lerp(
     inputs: _TensorList,
     end: _TensorList,
@@ -1398,12 +1402,13 @@ Applies :func:`torch.lerp` to corresponding tensors in ``inputs`` and
 
 {_common_doc("torch.lerp", inplace=False, has_aligned_lists=True)}
 
-``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
+``weight`` may be one shared scalar, a shared 0-D scalar tensor, a scalar list
+or tuple, or a tensor list.
 
 Args:
     inputs (list or tuple of Tensor): starting tensors.
     end (list or tuple of Tensor): ending tensors.
-    weight (Number, list or tuple of Number, or list or tuple of Tensor):
+    weight (Number, list or tuple of Number, list or tuple of Tensor, or Tensor):
         interpolation weights.
 
 Returns:
@@ -1428,6 +1433,10 @@ def lerp_(
 
 
 @overload
+def lerp_(inputs: _TensorList, end: _TensorList, weight: Tensor, /) -> _TensorList: ...
+
+
+@overload
 def lerp_(
     inputs: _TensorList,
     end: _TensorList,
@@ -1442,12 +1451,13 @@ In-place version of :func:`torch.foreach.lerp`.
 
 {_common_doc("torch.lerp", inplace=True, has_aligned_lists=True)}
 
-``weight`` may be one shared scalar, a scalar list or tuple, or a tensor list.
+``weight`` may be one shared scalar, a shared 0-D scalar tensor, a scalar list
+or tuple, or a tensor list.
 
 Args:
     inputs (list or tuple of Tensor): starting tensors to mutate.
     end (list or tuple of Tensor): ending tensors.
-    weight (Number, list or tuple of Number, or list or tuple of Tensor):
+    weight (Number, list or tuple of Number, list or tuple of Tensor, or Tensor):
         interpolation weights.
 
 Returns:

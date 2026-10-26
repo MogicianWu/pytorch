@@ -90,6 +90,16 @@ inline void check_foreach_api_restrictions(
   check_foreach_api_restrictions(tensors1, scalars);
 }
 
+inline void check_foreach_lerp_weight(const Tensor& weight) {
+  TORCH_CHECK(
+      weight.dim() == 0 && weight.numel() == 1,
+      "weight tensor expected to be 0 dim but it has ",
+      weight.dim(),
+      " dimensions and ",
+      weight.numel(),
+      " elements.");
+}
+
 // Helper function called in check_fast_path_restrictions to check whether all
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
